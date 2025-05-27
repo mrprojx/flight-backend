@@ -5,43 +5,54 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enable CORS for all routes
+// Enable CORS for all incoming requests
 app.use(cors());
 
-// Test route (optional)
+// Test route to confirm the backend is running
 app.get('/api/hello', (req, res) => {
   res.json({ message: 'Flight backend is working!' });
 });
 
-// OpenSky flight data route
-app.get('/api/flights', async (req, res) => {
+// Main AviationStack flight data route
+app.get('/api/flight/:flightNumber', async (req, res) => {
+  const { flightNumber } = req.params;
+  const apiKey = process.env.AVIATIONSTACK_API_KEY;
+
+  if (!apiKey) {
+    return res.status(500).json({ error: 'AviationStack API key is not configured on the server.' });
+  }
+
   try {
-    const response = await axios.get('https://opensky-network.org/api/states/all');
+    const response = await axios.get('http://api.aviationstack.com/v1/flights', {
+      params: {
+        access_key: apiKey,
+        flight_iata: flightNumber
+      }
+    });
 
-    const flights = response.data.states.map(flight => ({
-      icao24: flight[0],
-      callsign: flight[1]?.trim(),
-      origin_country: flight[2],
-      time_position: flight[3],
-      last_contact: flight[4],
-      longitude: flight[5],
-      latitude: flight[6],
-      baro_altitude: flight[7],
-      on_ground: flight[8],
-      velocity: flight[9],
-      heading: flight[10],
-      vertical_rate: flight[11],
-      geo_altitude: flight[13]
-    }));
+    const flights = response.data.data;
 
-    res.json({ flights });
-  } catch (err) {
-    console.error('Error fetching flight data:', err.message);
-    res.status(500).json({ error: 'Unable to fetch flight data' });
+    if (!flights || flights.length === 0) {
+      return res.status(404).json({ error: `No flight data found for ${flightNumber}.` });
+    }
+
+    const flight = flights[0];
+
+    res.json({
+      callsign: flight.flight?.iata || flight.flight?.icao || flight.flight?.number || 'N/A',
+      origin: flight.departure?.airport || 'Unknown',
+      destination: flight.arrival?.airport || 'Unknown',
+      departureTimeUTC: flight.departure?.estimated || flight.departure?.scheduled || 'N/A',
+      arrivalTimeUTC: flight.arrival?.estimated || flight.arrival?.scheduled || 'N/A',
+      altitude: flight.live?.altitude || 'N/A'
+    });
+  } catch (error) {
+    console.error('AviationStack API error:', error.message);
+    res.status(500).json({ error: 'An error occurred while retrieving flight data.' });
   }
 });
 
-// Start the server
+// Start the Express server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`SkyTrace backend is running on port ${PORT}`);
 });
